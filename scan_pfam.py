@@ -1,9 +1,9 @@
-import requests
-import sys
-import os
-import time
-import json
 import csv
+import os
+import sys
+import time
+
+import requests
 from Bio import SeqIO
 
 # --- Konfiguracja ---

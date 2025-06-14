@@ -1,8 +1,7 @@
 import os
-import sys
 import subprocess
-from shutil import which
-from Bio.Seq import Seq
+import sys
+
 from Bio import SeqIO
 
 # Input file names
