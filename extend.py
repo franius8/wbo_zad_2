@@ -1,70 +1,105 @@
+import argparse
 import os
 import subprocess
 import sys
 
 from Bio import SeqIO
 
-# Input file names
-GENES_FASTA_FILE = "genes_e_coli_new.fa"
-FRAGMENTS_FASTA_FILE = "protein_fragments.fa"
-OUTPUT_FASTA_FILE = "extended_proteins.fa"
+parser = argparse.ArgumentParser(
+    description="Extend protein fragments by finding matching gene sequences using BLAST.",
+    formatter_class=argparse.ArgumentDefaultsHelpFormatter
+)
+parser.add_argument(
+    "--genes",
+    default="genes_e_coli_new.fa",
+    help="Path to the input FASTA file containing gene sequences."
+)
+parser.add_argument(
+    "--fragments",
+    default="protein_fragments.fa",
+    help="Path to the input FASTA file containing protein fragment sequences."
+)
+parser.add_argument(
+    "--output",
+    default="extended_proteins.fa",
+    help="Path to the output FASTA file for extended protein sequences."
+)
+parser.add_argument(
+    "--db_name",
+    default="ecoli_db",
+    help="Name for the BLAST database to be created."
+)
+parser.add_argument(
+    "--blast_results",
+    default="blast_results.tsv",
+    help="Path to the output file for BLAST results."
+)
 
-# Output file names
-BLAST_DB_NAME = "ecoli_db"
-BLAST_RESULTS_FILE = "blast_results.tsv"
+args = parser.parse_args()
+
+# Fasta filenames from arguments
+genes_fasta_file = args.genes
+fragments_fasta_file = args.fragments
+output_fasta_file = args.output
+
+# BLAST filenames from arguments
+blast_db_name = args.db_name
+blast_results_file = args.blast_results
 
 # Check if provided files exist
-if not os.path.exists(GENES_FASTA_FILE):
-    print(f"BŁĄD: Plik wejściowy z genami '{GENES_FASTA_FILE}' nie został znaleziony.", file=sys.stderr)
+if not os.path.exists(genes_fasta_file):
+    print(f"ERROR: input file '{genes_fasta_file}' not found.", file=sys.stderr)
     sys.exit(1)
 
-if not os.path.exists(FRAGMENTS_FASTA_FILE):
-    print(f"BŁĄD: Plik wejściowy z fragmentami '{FRAGMENTS_FASTA_FILE}' nie został znaleziony.", file=sys.stderr)
+if not os.path.exists(fragments_fasta_file):
+    print(f"ERROR: input file '{fragments_fasta_file}' not found.", file=sys.stderr)
     sys.exit(1)
 
-print(f"1. Tworzenie bazy danych BLAST z pliku '{GENES_FASTA_FILE}'...")
-db_name = "ecoli_db"
-makeblastdb_cmd = ["makeblastdb", "-in", GENES_FASTA_FILE, "-dbtype", "nucl", "-out", db_name]
+# Create BLAST database from the input file
+print(f"1. Creating BLAST database from file '{genes_fasta_file}'...")
+makeblastdb_cmd = ["makeblastdb", "-in", genes_fasta_file, "-dbtype", "nucl", "-out", blast_db_name]
 subprocess.run(makeblastdb_cmd, check=True, capture_output=True)
 
-print(f"2. Przeszukiwanie bazy danych przy użyciu '{FRAGMENTS_FASTA_FILE}'...")
+# Search the created BLAST database using the input fragments file
+print(f"2. Searching created BLAST database using '{fragments_fasta_file}'...")
 blast_results_file = "blast_results.tsv"
 tblastn_cmd = [
     "tblastn",
-    "-query", FRAGMENTS_FASTA_FILE,
-    "-db", db_name,
+    "-query", fragments_fasta_file,
+    "-db", blast_db_name,
     "-out", blast_results_file,
     "-outfmt", "6 qseqid sseqid sframe pident length evalue bitscore",
     "-max_target_seqs", "1"
 ]
 subprocess.run(tblastn_cmd, check=True, capture_output=True)
 
-print(f"3. Przetwarzanie wyników i zapisywanie do '{OUTPUT_FASTA_FILE}'...")
-gene_records = SeqIO.to_dict(SeqIO.parse(GENES_FASTA_FILE, "fasta"))
+# Process the results and save them to the output file.
+print(f"3. Processing results and saving to '{output_fasta_file}'...")
+gene_records = SeqIO.to_dict(SeqIO.parse(genes_fasta_file, "fasta"))
 output_records = []
 
 with open(blast_results_file, 'r') as results:
     for line in results:
         parts = line.strip().split('\t')
-        if len(parts) < 7: continue  # Pomijaj niepoprawnie sformatowane linie
+        if len(parts) < 7: continue  # Skip malformed lines
 
-        # Rozpakuj wszystkie kolumny, nawet jeśli nie wszystkie są używane
+        # Unpack row
         query_id, subject_id, frame_str, pident, length, evalue, bitscore = parts
         frame = int(frame_str)
 
-        # Znajdź odpowiedni gen
+        # Find the right gene
         if subject_id in gene_records:
             gene_record = gene_records[subject_id]
             dna_seq = gene_record.seq
 
-            # Użyj odpowiedniej nici DNA i dokonaj translacji
+            # Use the right dna strand and perform translation
             if frame < 0:
                 dna_seq = dna_seq.reverse_complement()
 
             start_pos = abs(frame) - 1
             protein_seq = dna_seq[start_pos:].translate(to_stop=True)
 
-            # Przygotuj rekord do zapisu, dodając więcej informacji do nagłówka
+            # Prepare record for saving
             output_record = SeqIO.SeqRecord(
                 seq=protein_seq,
                 id=query_id,
@@ -73,7 +108,7 @@ with open(blast_results_file, 'r') as results:
             output_records.append(output_record)
 
 if output_records:
-    SeqIO.write(output_records, OUTPUT_FASTA_FILE, "fasta")
-    print(f"\nZakończono. Zapisano {len(output_records)} sekwencji do pliku '{OUTPUT_FASTA_FILE}'.")
+    SeqIO.write(output_records, output_fasta_file, "fasta")
+    print(f"\nSaved {len(output_records)} sequences to file '{output_fasta_file}'.")
 else:
-    print("\nZakończono. Nie znaleziono żadnych dopasowań.")
+    print("\nNo matches found.")
